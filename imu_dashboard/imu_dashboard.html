@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IMU Telemetry Dashboard | Enterprise Edition</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg-base: #0b0c10;
+      --bg-panel: #14161c;
+      --bg-card: rgba(255, 255, 255, 0.03);
+      --text-main: #e2e8f0;
+      --text-muted: #8b949e;
+      --accent-primary: #3b82f6;
+      --accent-success: #10b981;
+      --accent-danger: #ef4444;
+      --accent-warn: #f59e0b;
+      --border-color: #272b36;
+    }
+
+    body {
+      margin: 0;
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      overflow: hidden;
+      display: flex;
+      height: 100vh;
+    }
+
+    /* ------------------- Layout ------------------- */
+    #viewport-container { flex: 1; position: relative; min-width: 0; }
+    #viewport { width: 100%; height: 100%; display: block; }
+
+    #sidebar {
+      width: 400px; /* 稍微加宽以容纳更紧凑的多列布局 */
+      background-color: var(--bg-panel);
+      border-left: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      box-shadow: -8px 0 24px rgba(0,0,0,0.4);
+      z-index: 10;
+    }
+
+    .panel-section { padding: 18px 20px; border-bottom: 1px solid var(--border-color); }
+    .panel-section:last-child { border-bottom: none; }
+    
+    .section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--text-muted);
+      margin: 0 0 14px 0;
+      font-weight: 600;
+    }
+
+    /* ------------------- Header & Badge ------------------- */
+    .overlay-header {
+      position: absolute;
+      top: 24px; left: 24px;
+      pointer-events: none; user-select: none;
+    }
+    .overlay-header h1 {
+      margin: 0 0 8px 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+    }
+
+    .status-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--accent-success);
+      padding: 5px 14px; border-radius: 999px;
+      font-size: 12px; font-weight: 600;
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      backdrop-filter: blur(4px);
+    }
+    .status-badge.disconnected {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--accent-danger);
+      border-color: rgba(239, 68, 68, 0.25);
+    }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background-color: currentColor; box-shadow: 0 0 8px currentColor;
+    }
+
+    /* ------------------- Data Grid ------------------- */
+    .data-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .data-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 6px; padding: 10px;
+    }
+    .data-label { font-size: 11px; font-weight: 500; color: var(--text-muted); margin-bottom: 4px; }
+    .data-value { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; color: var(--text-main); }
+    
+    .val-roll { color: var(--accent-danger); }
+    .val-pitch { color: var(--accent-success); }
+    .val-yaw { color: var(--accent-primary); }
+
+    /* ------------------- Charts ------------------- */
+    .chart-grid { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+    .chart-wrapper {
+      position: relative;
+      background: #000;
+      border: 1px solid var(--border-color);
+      border-radius: 6px; overflow: hidden;
+    }
+    canvas.chart { width: 100%; height: 75px; display: block; } /* 缩小图表高度使布局紧凑 */
+    
+    /* 悬浮在图表内部的指示牌 */
+    .chart-badge {
+      position: absolute;
+      top: 6px; left: 8px;
+      font-size: 10px; font-weight: 700; font-family: 'JetBrains Mono', monospace;
+      background: rgba(11, 12, 16, 0.7);
+      padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border-color);
+      pointer-events: none; backdrop-filter: blur(2px);
+    }
+
+    /* ------------------- Controls & Settings ------------------- */
+    /* Custom Toggle Switch */
+    .switch-row { display: flex; justify-content: space-between; align-items: center; }
+    .switch-label { font-size: 12px; font-weight: 500; color: var(--text-main); }
+    .switch { position: relative; display: inline-block; width: 34px; height: 20px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #2d3340; transition: .3s; border-radius: 20px; }
+    .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: #8b949e; transition: .3s; border-radius: 50%; }
+    input:checked + .slider { background-color: var(--accent-primary); }
+    input:checked + .slider:before { transform: translateX(14px); background-color: #fff; box-shadow: 0 0 5px rgba(0,0,0,0.3); }
+
+    /* 网格化坐标校准卡片 */
+    .calib-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 6px; }
+    .calib-card {
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      border-radius: 6px; padding: 12px 0;
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+    }
+    .calib-card .axis-name { font-size: 11px; font-weight: 600; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+
+    /* 串口终端 */
+    .terminal-card {
+      margin-top: 16px;
+      background: linear-gradient(180deg, #11151d 0%, #0c0f14 100%);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .terminal-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-color);
+      background: rgba(255,255,255,0.02);
+    }
+    .terminal-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: #93c5fd;
+    }
+    .terminal-meta {
+      margin-top: 4px;
+      display: flex;
+      gap: 10px;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .terminal-actions { display: flex; gap: 8px; }
+    .terminal-btn {
+      border: 1px solid var(--border-color);
+      background: #1b2230;
+      color: var(--text-main);
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 5px 10px;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background 0.2s ease, border-color 0.2s ease;
+    }
+    .terminal-btn:hover { background: #232d40; border-color: #3a4a69; }
+    .terminal-btn.active { border-color: #93c5fd; color: #93c5fd; }
+    .terminal-output {
+      height: 220px;
+      overflow-y: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      line-height: 1.55;
+      padding: 10px 12px;
+      background: #07090d;
+    }
+    .terminal-empty {
+      color: var(--text-muted);
+      font-style: italic;
+      padding: 2px 0;
+    }
+    .terminal-line {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      color: #a7f3d0;
+      margin-bottom: 2px;
+    }
+    .terminal-line.bad { color: #fca5a5; }
+    .terminal-ts {
+      color: #94a3b8;
+      min-width: 62px;
+      flex-shrink: 0;
+    }
+    .terminal-text {
+      white-space: pre-wrap;
+      word-break: break-all;
+      flex: 1;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: var(--bg-base); }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+  </style>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/smoothie/1.34.0/smoothie.min.js"></script>
+</head>
+
+<body>
+  <div id="viewport-container">
+    <div id="viewport"></div>
+    <div class="overlay-header">
+      <h1>IMU Telemetry</h1>
+      <div id="status-badge" class="status-badge disconnected">
+        <div class="status-dot"></div>
+        <span id="status-text">Connecting...</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="sidebar">
+    
+    <div class="panel-section">
+      <h2 class="section-title">Live Data Stream</h2>
+      <div class="data-grid">
+        <div class="data-card"><div class="data-label">Sample Rate</div><div class="data-value" id="val-fps">0.0 FPS</div></div>
+        <div class="data-card"><div class="data-label">Status</div><div class="data-value" id="val-stat" style="color:var(--text-muted);">—</div></div>
+        <div class="data-card"><div class="data-label">Roll (X)</div><div class="data-value val-roll" id="val-r">0.00°</div></div>
+        <div class="data-card"><div class="data-label">Pitch (Y)</div><div class="data-value val-pitch" id="val-p">0.00°</div></div>
+        <div class="data-card"><div class="data-label">Yaw (Z)</div><div class="data-value val-yaw" id="val-y">0.00°</div></div>
+        <div class="data-card"><div class="data-label">Trust Index</div><div class="data-value" id="val-trust">0.00</div></div>
+      </div>
+
+      <div class="chart-grid">
+        <div class="chart-wrapper">
+          <div class="chart-badge" style="color: var(--accent-danger);">■ Roll X</div>
+          <canvas id="chart-roll" class="chart"></canvas>
+        </div>
+        <div class="chart-wrapper">
+          <div class="chart-badge" style="color: var(--accent-success);">■ Pitch Y</div>
+          <canvas id="chart-pitch" class="chart"></canvas>
+        </div>
+        <div class="chart-wrapper">
+          <div class="chart-badge" style="color: var(--accent-primary);">■ Yaw Z</div>
+          <canvas id="chart-yaw" class="chart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <h2 class="section-title">Calibration & Serial Terminal</h2>
+      
+      <div class="calib-grid">
+        <div class="calib-card">
+          <span class="axis-name">INV X</span>
+          <label class="switch"><input type="checkbox" id="inv-x"><span class="slider"></span></label>
+        </div>
+        <div class="calib-card">
+          <span class="axis-name">INV Y</span>
+          <label class="switch"><input type="checkbox" id="inv-y"><span class="slider"></span></label>
+        </div>
+        <div class="calib-card">
+          <span class="axis-name">INV Z</span>
+          <label class="switch"><input type="checkbox" id="inv-z"><span class="slider"></span></label>
+        </div>
+      </div>
+
+      <div class="terminal-card">
+        <div class="terminal-toolbar">
+          <div>
+            <div class="terminal-title">Serial Output</div>
+            <div class="terminal-meta">
+              <span id="serial-state">Waiting for data</span>
+              <span id="serial-lines">0 lines</span>
+            </div>
+          </div>
+          <div class="terminal-actions">
+            <button id="btn-terminal-pause" class="terminal-btn" type="button">Pause</button>
+            <button id="btn-terminal-clear" class="terminal-btn" type="button">Clear</button>
+          </div>
+        </div>
+        <div id="serial-output" class="terminal-output">
+          <div id="serial-empty" class="terminal-empty">No serial output yet.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      // ==========================================================
+      // 0) Utils
+      // ==========================================================
+      const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+      const wrapDeg = (deg) => {
+        let x = deg % 360;
+        if (x >= 180) x -= 360;
+        if (x < -180) x += 360;
+        return x;
+      };
+
+      // ==========================================================
+      // 1) DOM
+      // ==========================================================
+      const el = {
+        badge: document.getElementById('status-badge'),
+        statusText: document.getElementById('status-text'),
+        fps: document.getElementById('val-fps'),
+        trust: document.getElementById('val-trust'),
+        r: document.getElementById('val-r'),
+        p: document.getElementById('val-p'),
+        y: document.getElementById('val-y'),
+        stat: document.getElementById('val-stat'),
+
+        invX: document.getElementById('inv-x'),
+        invY: document.getElementById('inv-y'),
+        invZ: document.getElementById('inv-z'),
+
+        serialOutput: document.getElementById('serial-output'),
+        serialState: document.getElementById('serial-state'),
+        serialLines: document.getElementById('serial-lines'),
+        serialEmpty: document.getElementById('serial-empty'),
+        btnTerminalPause: document.getElementById('btn-terminal-pause'),
+        btnTerminalClear: document.getElementById('btn-terminal-clear'),
+
+        cRoll: document.getElementById('chart-roll'),
+        cPitch: document.getElementById('chart-pitch'),
+        cYaw: document.getElementById('chart-yaw'),
+
+        viewport: document.getElementById('viewport')
+      };
+
+      const getAxisConfig = () => ({
+        invX: el.invX.checked ? -1 : 1,
+        invY: el.invY.checked ? -1 : 1,
+        invZ: el.invZ.checked ? -1 : 1,
+      });
+
+      // ==========================================================
+      // 2) SmoothieCharts
+      // ==========================================================
+      const baseChartOpts = {
+        millisPerPixel: 15,
+        grid: { fillStyle: 'rgba(0,0,0,0)', strokeStyle: '#272b36', verticalSections: 3, borderVisible: false },
+        labels: { fillStyle: '#8b949e', precision: 0 },
+        maxValue: 180, minValue: -180, responsive: false
+      };
+
+      const chartRoll = new SmoothieChart(baseChartOpts);
+      const chartPitch = new SmoothieChart(baseChartOpts);
+      const chartYaw = new SmoothieChart(baseChartOpts);
+
+      const tsRoll = new TimeSeries();
+      const tsPitch = new TimeSeries();
+      const tsYaw = new TimeSeries();
+
+      chartRoll.addTimeSeries(tsRoll, { strokeStyle: '#ef4444', lineWidth: 1.5 });
+      chartPitch.addTimeSeries(tsPitch, { strokeStyle: '#10b981', lineWidth: 1.5 });
+      chartYaw.addTimeSeries(tsYaw, { strokeStyle: '#3b82f6', lineWidth: 1.5 });
+
+      function resizeCanvasHiDPI(canvas) {
+        const dpr = window.devicePixelRatio || 1;
+        const cssW = canvas.clientWidth;
+        const cssH = canvas.clientHeight;
+        if (!cssW || !cssH) return;
+        const pxW = Math.floor(cssW * dpr);
+        const pxH = Math.floor(cssH * dpr);
+        if (canvas.width !== pxW) canvas.width = pxW;
+        if (canvas.height !== pxH) canvas.height = pxH;
+      }
+
+      function resizeAllCharts() {
+        resizeCanvasHiDPI(el.cRoll);
+        resizeCanvasHiDPI(el.cPitch);
+        resizeCanvasHiDPI(el.cYaw);
+      }
+
+      resizeAllCharts();
+      chartRoll.streamTo(el.cRoll, 1000);
+      chartPitch.streamTo(el.cPitch, 1000);
+      chartYaw.streamTo(el.cYaw, 1000);
+
+      let lastChartMs = 0;
+      const CHART_INTERVAL_MS = 1000 / 30;
+
+      // ==========================================================
+      // 3) Three.js
+      // ==========================================================
+      let camera, scene, renderer, physicsFrame, sensorMesh;
+
+      function init3D() {
+        const container = el.viewport;
+        scene = new THREE.Scene();
+        scene.fog = new THREE.Fog(0x0b0c10, 5, 15);
+
+        camera = new THREE.PerspectiveCamera(40, container.clientWidth / container.clientHeight, 0.1, 100);
+        camera.position.set(4, 3, 5); camera.lookAt(0, 0, 0);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.outputEncoding = THREE.sRGBEncoding;
+
+        container.appendChild(renderer.domElement);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+
+        const spotLight = new THREE.SpotLight(0xffffff, 1.5);
+        spotLight.position.set(2, 6, 2); spotLight.angle = Math.PI / 4;
+        spotLight.penumbra = 0.5; spotLight.castShadow = true;
+        scene.add(spotLight);
+
+        const grid = new THREE.GridHelper(20, 40, 0x272b36, 0x14161c);
+        grid.position.y = -0.5; scene.add(grid);
+
+        physicsFrame = new THREE.Group();
+        physicsFrame.rotation.x = -Math.PI / 2;
+        scene.add(physicsFrame);
+
+        const geometry = new THREE.BoxGeometry(1.6, 1.0, 0.15);
+        const material = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.3, metalness: 0.8 });
+        sensorMesh = new THREE.Mesh(geometry, material);
+        sensorMesh.castShadow = true;
+
+        sensorMesh.add(new THREE.AxesHelper(1.5));
+        physicsFrame.add(sensorMesh);
+
+        window.addEventListener('resize', () => {
+          camera.aspect = container.clientWidth / container.clientHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(container.clientWidth, container.clientHeight);
+          renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+          resizeAllCharts();
+        }, { passive: true });
+      }
+
+      function animate() { requestAnimationFrame(animate); renderer.render(scene, camera); }
+      init3D(); animate();
+
+// ==========================================================
+      // 4) WebSocket (极速重连优化版)
+      // ==========================================================
+      function buildWsUrl() {
+        const qs = new URLSearchParams(location.search);
+        return qs.get('ws') || 'ws://localhost:8765';
+      }
+
+      let ws = null, reconnectTimer = 0, latestImu = null, lastRxMs = 0;
+      let terminalPaused = false, terminalLineCount = 0, lastSerialRxMs = 0;
+      const TERMINAL_MAX_LINES = 500;
+
+      function setStatus(connected, text) {
+        if (connected) el.badge.classList.remove('disconnected');
+        else el.badge.classList.add('disconnected');
+        el.statusText.textContent = text;
+      }
+
+      function scheduleReconnect() {
+        clearTimeout(reconnectTimer);
+        if (ws) {
+            ws.onclose = null; // 防止重复触发
+            ws.onerror = null;
+            ws.close();
+            ws = null;
+        }
+        // 固定 1.5 秒重试一次，拒绝漫长等待
+        reconnectTimer = setTimeout(connectWS, 1500);
+      }
+
+      function updateSerialLinesCounter() {
+        el.serialLines.textContent = `${terminalLineCount} lines`;
+      }
+
+      function appendSerialLine(line, parsed, tsSeconds) {
+        if (terminalPaused) return;
+        const box = el.serialOutput;
+        const shouldStickBottom = (box.scrollTop + box.clientHeight) >= (box.scrollHeight - 24);
+
+        if (el.serialEmpty) {
+          el.serialEmpty.remove();
+          el.serialEmpty = null;
+        }
+
+        const row = document.createElement('div');
+        row.className = parsed ? 'terminal-line' : 'terminal-line bad';
+
+        const ts = document.createElement('span');
+        ts.className = 'terminal-ts';
+        const dt = new Date((typeof tsSeconds === 'number' ? tsSeconds * 1000 : Date.now()));
+        ts.textContent = dt.toLocaleTimeString('zh-CN', { hour12: false });
+
+        const txt = document.createElement('span');
+        txt.className = 'terminal-text';
+        txt.textContent = line;
+
+        row.appendChild(ts);
+        row.appendChild(txt);
+        box.appendChild(row);
+        terminalLineCount += 1;
+
+        while (box.children.length > TERMINAL_MAX_LINES) {
+          box.removeChild(box.firstElementChild);
+          terminalLineCount -= 1;
+        }
+        updateSerialLinesCounter();
+
+        if (shouldStickBottom) {
+          box.scrollTop = box.scrollHeight;
+        }
+      }
+
+      function connectWS() {
+        clearTimeout(reconnectTimer);
+        setStatus(false, 'Connecting...');
+        if (!terminalPaused) el.serialState.textContent = 'Connecting';
+        try { ws = new WebSocket(buildWsUrl()); } 
+        catch { scheduleReconnect(); return; }
+
+        ws.onopen = () => { 
+            setStatus(true, 'Live Stream Active'); 
+            el.serialState.textContent = terminalPaused ? 'Paused' : 'Connected';
+        };
+        ws.onerror = () => { 
+            // 发生错误时，不要在这里调度重连，交给 onclose 统一处理即可
+        };
+        ws.onclose = () => { 
+            setStatus(false, 'Connection Lost'); 
+            if (!terminalPaused) el.serialState.textContent = 'Disconnected';
+            scheduleReconnect(); 
+        };
+        ws.onmessage = (event) => {
+          lastRxMs = performance.now();
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg?.type === 'imu_update' && msg.payload) {
+              const d = msg.payload;
+              const euler = Array.isArray(d.euler) ? d.euler : [0,0,0];
+              const q = Array.isArray(d.q) ? d.q : [1,0,0,0];
+              latestImu = {
+                fps: d.fps || 0, trust: d.trust || 0,
+                stationary: (d.stationary === true || d.stationary === 1),
+                euler: [wrapDeg(+euler[0]||0), wrapDeg(+euler[1]||0), wrapDeg(+euler[2]||0)],
+                q: [+q[0]||1, +q[1]||0, +q[2]||0, +q[3]||0]
+              };
+            } else if (msg?.type === 'serial_output' && msg.payload) {
+              lastSerialRxMs = performance.now();
+              const line = String(msg.payload.line ?? '');
+              const parsed = msg.payload.parsed !== false;
+              appendSerialLine(line, parsed, msg.payload.ts);
+              if (!terminalPaused) {
+                el.serialState.textContent = parsed ? 'Receiving' : 'Receiving (format warning)';
+              }
+            }
+          } catch(e) {}
+        };
+      }
+
+      // ==========================================================
+      // 5) Bindings & Loop
+      // ==========================================================
+      el.btnTerminalClear.addEventListener('click', () => {
+        el.serialOutput.innerHTML = '';
+        const empty = document.createElement('div');
+        empty.id = 'serial-empty';
+        empty.className = 'terminal-empty';
+        empty.textContent = 'No serial output yet.';
+        el.serialOutput.appendChild(empty);
+        el.serialEmpty = empty;
+        terminalLineCount = 0;
+        updateSerialLinesCounter();
+      });
+
+      el.btnTerminalPause.addEventListener('click', () => {
+        terminalPaused = !terminalPaused;
+        el.btnTerminalPause.textContent = terminalPaused ? 'Resume' : 'Pause';
+        el.btnTerminalPause.classList.toggle('active', terminalPaused);
+        el.serialState.textContent = terminalPaused ? 'Paused' : 'Connected';
+      });
+
+      function loop() {
+        const now = performance.now();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          setStatus(true, (now - lastRxMs) > 1500 ? 'Live Stream (No Data)' : 'Live Stream Active');
+          if (!terminalPaused && (now - lastSerialRxMs) > 1500) {
+            el.serialState.textContent = 'Connected (No serial data)';
+          }
+        }
+
+        if (latestImu) {
+          const d = latestImu;
+          el.fps.textContent = d.fps.toFixed(1) + ' FPS';
+          el.trust.textContent = clamp(d.trust, 0, 1).toFixed(2);
+          el.stat.textContent = d.stationary ? 'Stationary' : 'Moving';
+          el.stat.style.color = d.stationary ? 'var(--accent-success)' : 'var(--accent-warn)';
+
+          el.r.textContent = d.euler[0].toFixed(1) + '°';
+          el.p.textContent = d.euler[1].toFixed(1) + '°';
+          el.y.textContent = d.euler[2].toFixed(1) + '°';
+
+          const t = Date.now();
+          if ((t - lastChartMs) >= CHART_INTERVAL_MS) {
+            lastChartMs = t;
+            tsRoll.append(t, d.euler[0]); tsPitch.append(t, d.euler[1]); tsYaw.append(t, d.euler[2]);
+          }
+
+          if (sensorMesh) {
+            const conf = getAxisConfig();
+            sensorMesh.quaternion.set(d.q[2] * conf.invX, -d.q[1] * conf.invY, d.q[3] * conf.invZ, d.q[0]);
+          }
+        }
+        requestAnimationFrame(loop);
+      }
+      
+      connectWS(); loop();
+    })();
+  </script>
+</body>
+</html>
