@@ -13,6 +13,8 @@
 
 ------
 
+<img src="./images/demonstration.gif" style="zoom:200%;" />
+
 ## ✨ 核心特性
 
 - **高性能姿态解算**：集成 Mahony 互补滤波算法，针对 Cortex-M0 内核优化了快速平方根倒数运算。
